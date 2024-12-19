@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/umd/lucide.min.js"></script>
+    <style>
+        .synth-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        
+        .synth-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            padding: 24px;
+            margin: 20px 0;
+        }
+
+        .synth-slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            background: #e2e8f0;
+            border-radius: 3px;
+            outline: none;
+            margin: 10px 0;
+        }
+
+        .synth-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .synth-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        .synth-button {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin: 0 4px;
+        }
+
+        .synth-button-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .synth-button-outline {
+            background: transparent;
+            border: 1px solid #3b82f6;
+            color: #3b82f6;
+        }
+
+        .synth-button:hover {
+            opacity: 0.9;
+        }
+
+        .control-container {
+            margin-bottom: 16px;
+        }
+
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .frequency-markers {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #666;
+            padding: 0 8px;
+        }
+
+        .visualizer {
+            width: 100%;
+            height: 160px;
+            background: #f8fafc;
+            border-radius: 6px;
+            margin: 16px 0;
+        }
+
+        @media (max-width: 640px) {
+            .synth-container {
+                padding: 10px;
+            }
+            
+            .synth-card {
+                padding: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="synth-root"></div>
+    <script type="text/babel">
+        const SoundSynthesizer = () => {
+            const audioContextRef = React.useRef(null);
+            const oscillatorsRef = React.useRef([]);
+            const gainNodeRef = React.useRef(null);
+            const reverbNodeRef = React.useRef(null);
+            const dryGainRef = React.useRef(null);
+            const wetGainRef = React.useRef(null);
+            const isInitializedRef = React.useRef(false);
+            const canvasRef = React.useRef(null);
+
+            const [isPlaying, setIsPlaying] = React.useState(false);
+            const [soundParams, setSoundParams] = React.useState({
+                frequency: 440,
+                volume: 0.5,
+                reverb: 0.3,
+                complexity: 0.5
+            });
+
+            const cleanupOscillators = () => {
+                oscillatorsRef.current.forEach(osc => {
+                    try {
+                        osc.stop();
+                        osc.disconnect();
+                    } catch (e) {}
+                });
+                oscillatorsRef.current = [];
+            };
+
+            const createOscillators = (baseFreq, complexity) => {
+                cleanupOscillators();
+                const numHarmonics = Math.floor(complexity * 8) + 1;
+                
+                for (let i = 0; i < numHarmonics; i++) {
+                    const osc = audioContextRef.current.createOscillator();
+                    const harmonicFreq = baseFreq * (i + 1);
+                    
+                    if (i === 0) {
+                        osc.frequency.setValueAtTime(harmonicFreq, audioContextRef.current.currentTime);
+                        osc.connect(gainNodeRef.current);
+                    } else {
+                        const harmonicGain = audioContextRef.current.createGain();
+                        const amplitude = Math.pow(0.5, i) * (1 - complexity * 0.3);
+                        
+                        harmonicGain.gain.setValueAtTime(amplitude, audioContextRef.current.currentTime);
+                        osc.frequency.setValueAtTime(harmonicFreq, audioContextRef.current.currentTime);
+                        
+                        osc.connect(harmonicGain);
+                        harmonicGain.connect(gainNodeRef.current);
+                    }
+                    
+                    osc.start();
+                    oscillatorsRef.current.push(osc);
+                }
+            };
+
+            const createImpulseResponse = (duration) => {
+                const sampleRate = audioContextRef.current.sampleRate;
+                const length = sampleRate * duration;
+                const impulse = audioContextRef.current.createBuffer(2, length, sampleRate);
+                const leftChannel = impulse.getChannelData(0);
+                const rightChannel = impulse.getChannelData(1);
+
+                for (let i = 0; i < length; i++) {
+                    const decay = Math.exp(-i / (sampleRate * 0.1));
+                    const noise = Math.random() * 2 - 1;
+                    leftChannel[i] = noise * decay;
+                    rightChannel[i] = noise * decay;
+                }
+
+                return impulse;
+            };
+
+            const freqToSlider = (freq) => Math.log2(freq / 20) / Math.log2(1000);
+            const sliderToFreq = (value) => 20 * Math.pow(1000, value);
+            const formatFrequency = (freq) => freq >= 1000 ? `${(freq/1000).toFixed(1)} kHz` : `${Math.round(freq)} Hz`;
+
+            const initializeAudio = () => {
+                if (!isInitializedRef.current) {
+                    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    gainNodeRef.current = audioContextRef.current.createGain();
+                    dryGainRef.current = audioContextRef.current.createGain();
+                    wetGainRef.current = audioContextRef.current.createGain();
+
+                    reverbNodeRef.current = audioContextRef.current.createConvolver();
+                    reverbNodeRef.current.buffer = createImpulseResponse(2.0);
+
+                    gainNodeRef.current.gain.setValueAtTime(0, audioContextRef.current.currentTime);
+                    dryGainRef.current.gain.setValueAtTime(1 - soundParams.reverb, audioContextRef.current.currentTime);
+                    wetGainRef.current.gain.setValueAtTime(soundParams.reverb, audioContextRef.current.currentTime);
+
+                    gainNodeRef.current.connect(dryGainRef.current);
+                    gainNodeRef.current.connect(reverbNodeRef.current);
+                    reverbNodeRef.current.connect(wetGainRef.current);
+                    dryGainRef.current.connect(audioContextRef.current.destination);
+                    wetGainRef.current.connect(audioContextRef.current.destination);
+                    
+                    createOscillators(soundParams.frequency, soundParams.complexity);
+                    isInitializedRef.current = true;
+                }
+            };
+
+            const handleParamChange = (param, value) => {
+                if (!isInitializedRef.current) return;
+
+                setSoundParams(prev => ({ ...prev, [param]: value }));
+                
+                switch(param) {
+                    case 'frequency':
+                        const newFreq = sliderToFreq(value);
+                        setSoundParams(prev => ({ ...prev, frequency: newFreq }));
+                        createOscillators(newFreq, soundParams.complexity);
+                        break;
+                    case 'volume':
+                        if (isPlaying) {
+                            gainNodeRef.current.gain.setValueAtTime(value, audioContextRef.current.currentTime);
+                        }
+                        break;
+                    case 'reverb':
+                        dryGainRef.current.gain.setValueAtTime(1 - value, audioContextRef.current.currentTime);
+                        wetGainRef.current.gain.setValueAtTime(value, audioContextRef.current.currentTime);
+                        break;
+                    case 'complexity':
+                        createOscillators(soundParams.frequency, value);
+                        break;
+                }
+                
+                updateVisualization();
+            };
+
+            const toggleSound = () => {
+                if (!isInitializedRef.current) {
+                    initializeAudio();
+                }
+
+                if (!isPlaying) {
+                    audioContextRef.current.state === 'suspended' && audioContextRef.current.resume();
+                    gainNodeRef.current.gain.setValueAtTime(soundParams.volume, audioContextRef.current.currentTime);
+                } else {
+                    gainNodeRef.current.gain.setValueAtTime(0, audioContextRef.current.currentTime);
+                }
+                setIsPlaying(!isPlaying);
+            };
+
+            const randomizeParams = () => {
+                const newParams = {
+                    frequency: sliderToFreq(Math.random()),
+                    volume: Math.random() * 0.8,
+                    reverb: Math.random(),
+                    complexity: Math.random()
+                };
+                setSoundParams(newParams);
+                
+                if (isInitializedRef.current) {
+                    createOscillators(newParams.frequency, newParams.complexity);
+                    if (isPlaying) {
+                        gainNodeRef.current.gain.setValueAtTime(newParams.volume, audioContextRef.current.currentTime);
+                    }
+                    dryGainRef.current.gain.setValueAtTime(1 - newParams.reverb, audioContextRef.current.currentTime);
+                    wetGainRef.current.gain.setValueAtTime(newParams.reverb, audioContextRef.current.currentTime);
+                    updateVisualization();
+                }
+            };
+
+            const updateVisualization = () => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                const width = canvas.width;
+                const height = canvas.height;
+                
+                ctx.clearRect(0, 0, width, height);
+                
+                const numHarmonics = Math.floor(soundParams.complexity * 8) + 1;
+                for (let h = 0; h < numHarmonics; h++) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = `rgba(66, 153, 225, ${1 / (h + 1)})`;
+                    ctx.lineWidth = 2;
+                    
+                    const freq = soundParams.frequency * (h + 1);
+                    const amplitude = Math.pow(0.5, h) * soundParams.volume * height/4;
+                    
+                    for (let i = 0; i < width; i++) {
+                        const x = i;
+                        const y = height/2 + Math.sin(i * freq/1000 * 0.1) * amplitude;
+                        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+            };
+
+            React.useEffect(() => {
+                const canvas = canvasRef.current;
+                if (canvas) {
+                    updateVisualization();
+                }
+            }, []);
+
+            const frequencyMarkers = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+
+            return (
+                <div className="synth-container">
+                    <div className="synth-card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h2 style={{ fontSize: '24px', fontWeight: 'bold' }}>Sound Synthesizer</h2>
+                            <div>
+                                <button 
+                                    className={`synth-button ${isPlaying ? 'synth-button-outline' : 'synth-button-primary'}`}
+                                    onClick={toggleSound}
+                                >
+                                    {isPlaying ? 'Stop' : 'Play'}
+                                </button>
+                                <button 
+                                    className="synth-button synth-button-outline"
+                                    onClick={randomizeParams}
+                                >
+                                    Randomize
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="visualizer">
+                            <canvas
+                                ref={canvasRef}
+                                width={800}
+                                height={160}
+                                style={{ width: '100%', height: '100%' }}
+                            />
+                        </div>
+
+                        <div style={{ marginTop: '20px' }}>
+                            <div className="control-container">
+                                <div className="control-label">
+                                    <span>Frequency</span>
+                                    <span>{formatFrequency(soundParams.frequency)}</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    className="synth-slider"
+                                    value={freqToSlider(soundParams.frequency)}
+                                    onChange={(e) => handleParamChange('frequency', parseFloat(e.target.value))}
+                                    min="0"
+                                    max="1"
+                                    step="0.001"
+                                />
+                                <div className="frequency-markers">
+                                    {frequencyMarkers.map((freq, index) => (
+                                        <span key={index}>{formatFrequency(freq)}</span>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="control-container">
+                                <div className="control-label">
+                                    <span>Volume</span>
+                                    <span>{Math.round(soundParams.volume * 100)}%</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    className="synth-slider"
+                                    value={soundParams.volume}
+                                    onChange={(e) => handleParamChange('volume', parseFloat(e.target.value))}
+                                    min="0"
+                                    max="1"
+                                    step="0.01"
+                                />
+                            </div>
+
+                            <div className="control-container">
+                                <div className="control-label">
+                                    <span>Harmonics</span>
+                                    <span>{Math.floor(soundParams.complexity * 8) + 1} harmonics</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    className="synth-slider"
+                                    value={soundParams.complexity}
+                                    onChange={(e) => handleParamChange('complexity', parseFloat(e.target.value))}
+                                    min="0"
+                                    max="1"
+                                    step="0.01"
+                                />
+                            </div>
+
+                            <div className="control-container">
+                                <div className="control-label">
+                                    <span>Reverb</span>
+                                    <span>{Math.round(soundParams.reverb * 100)}%</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    className="synth-slider"
+                                    value={soundParams.reverb}
+                                    onChange={(e) => handleParamChange('reverb', parseFloat(e.target.value))}
+                                    min="0"
+                                    max="1"
+                                    step="0.01"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('synth-root'));
+        root.render(<SoundSynthesizer />);
+    </script>
+</body>
+</html>
