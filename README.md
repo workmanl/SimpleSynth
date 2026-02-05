@@ -2,6 +2,10 @@
 
 A web-based synthesizer built with React and the Web Audio API. Create and manipulate sounds in real-time with an intuitive interface.
 
+## Live Demo
+
+https://workmanl.github.io/SimpleSynth/
+
 ## Features
 
 - **Real-time Sound Generation**: Generate tones using multiple oscillators with adjustable harmonics
@@ -58,6 +62,10 @@ Oscillators → Gain Node → Dry/Wet Split → Reverb → Output
 ## Development
 
 This is a standalone HTML file with no build process required. All dependencies are loaded via CDN for easy deployment and offline use.
+
+## Contributing
+
+See `AGENTS.md` for repository guidelines and conventions.
 
 ## License
 
